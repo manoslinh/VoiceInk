@@ -1,12 +1,28 @@
 import Foundation
 
 struct TranscriptionRequestContext {
+    /// The single language code for engines that accept only one (the primary
+    /// selection, or "auto" when multiple languages are selected).
     let language: String?
+    /// The full validated selection. Engines that can constrain by it (Parakeet
+    /// v3) use this; others fall back to `language`. Defaults to `[language]`.
+    let languages: [String]
     let prompt: String?
 
+    init(language: String?, languages: [String]? = nil, prompt: String?) {
+        self.language = language
+        self.languages = languages ?? language.map { [$0] } ?? []
+        self.prompt = prompt
+    }
+
     static var currentDefaults: TranscriptionRequestContext {
-        TranscriptionRequestContext(
-            language: UserDefaults.standard.string(forKey: "SelectedLanguage") ?? "auto",
+        let stored = UserDefaults.standard.string(forKey: "SelectedLanguage") ?? "auto"
+        let parsed = TranscriptionLanguageSupport.parseSelectedLanguages(stored)
+        let languages = parsed.isEmpty ? ["auto"] : parsed
+        let primary = languages.count == 1 ? languages[0] : "auto"
+        return TranscriptionRequestContext(
+            language: primary,
+            languages: languages,
             prompt: UserDefaults.standard.string(forKey: "TranscriptionPrompt")
         )
     }

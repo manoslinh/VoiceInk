@@ -62,7 +62,17 @@ class TranscriptionServiceRegistry {
 
     /// Whether the resolved transcription configuration should use real-time transcription.
     func shouldUseRealtimeTranscription(for configuration: TranscriptionRuntimeConfiguration) -> Bool {
-        configuration.isRealtimeEnabled
+        guard configuration.isRealtimeEnabled else { return false }
+
+        // A multi-script language restriction (e.g. English + Greek) is honored
+        // by the batch decoder, which runs one script-filtered pass per script
+        // and keeps the best result. The streaming path can only force a single
+        // script, so route genuine multi-script selections to batch instead.
+        let scriptHints = FluidAudioModelManager.languageHints(
+            from: configuration.languages,
+            for: configuration.model.name
+        )
+        return scriptHints.count <= 1
     }
 
     func cleanup() async {

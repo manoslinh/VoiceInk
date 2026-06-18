@@ -44,13 +44,19 @@ class AudioTranscriptionService: ObservableObject {
         
         do {
             let mode = mode ?? ModeManager.shared.currentEffectiveConfiguration
-            let language = TranscriptionLanguageSupport.validLanguageOrFallback(
+            let language = TranscriptionLanguageSupport.primaryLanguage(
+                mode?.selectedLanguage,
+                for: model,
+                realtimeEnabled: mode?.isRealtimeTranscriptionEnabled
+            )
+            let languages = TranscriptionLanguageSupport.validLanguages(
                 mode?.selectedLanguage,
                 for: model,
                 realtimeEnabled: mode?.isRealtimeTranscriptionEnabled
             )
             let requestContext = TranscriptionRequestContext(
                 language: language,
+                languages: languages,
                 prompt: UserDefaults.standard.string(forKey: "TranscriptionPrompt")
             )
             let modeName = (mode?.isEnabled == true) ? mode?.name : nil

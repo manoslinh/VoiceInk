@@ -135,6 +135,35 @@ class FluidAudioModelManager: ObservableObject {
         return Language(rawValue: languageCode)
     }
 
+    /// Whether this model can constrain decoding by language script. Parakeet
+    /// v3's `language` hint is a script-aware token filter; v2 / unified /
+    /// Nemotron ignore it.
+    nonisolated static func supportsScriptFiltering(named modelName: String) -> Bool {
+        !isParakeetUnifiedModel(named: modelName)
+            && !isNemotronModel(named: modelName)
+            && asrVersion(for: modelName) == .v3
+    }
+
+    /// Maps a list of selected language codes to the script-filter hints needed
+    /// to honor them. Because the v3 filter is purely script-based (Latin /
+    /// Cyrillic / Greek), languages sharing a script collapse to one hint, so
+    /// the count equals the number of *distinct scripts* — i.e. the number of
+    /// decode passes required. Returns `[]` for auto-detect or unsupported
+    /// models (meaning: no constraint, single auto pass).
+    nonisolated static func languageHints(from languageCodes: [String], for modelName: String) -> [Language] {
+        guard supportsScriptFiltering(named: modelName) else { return [] }
+
+        var seenScripts = Set<Script>()
+        var hints: [Language] = []
+        for code in languageCodes where code != "auto" {
+            guard let language = Language(rawValue: code) else { continue }
+            if seenScripts.insert(language.script).inserted {
+                hints.append(language)
+            }
+        }
+        return hints
+    }
+
     init() {}
 
     // MARK: - Query helpers

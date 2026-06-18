@@ -55,7 +55,12 @@ struct LanguageSelectionView: View {
 
     private func useCompatibleLanguageForCurrentModel() {
         guard let currentModel = transcriptionModelManager.currentTranscriptionModel else { return }
-        updateLanguage(TranscriptionLanguageSupport.validLanguageOrFallback(selectedLanguage, for: currentModel))
+        updateLanguage(TranscriptionLanguageSupport.normalizedSelection(selectedLanguage, for: currentModel))
+    }
+
+    private func supportsMultipleLanguages() -> Bool {
+        guard let currentModel = transcriptionModelManager.currentTranscriptionModel else { return false }
+        return TranscriptionLanguageSupport.supportsMultipleLanguages(for: currentModel)
     }
 
     // Get the display name of the current language
@@ -123,6 +128,20 @@ struct LanguageSelectionView: View {
                             .foregroundColor(.secondary)
                     }
                     .disabled(true)
+                } else if supportsMultipleLanguages() {
+                    VStack(alignment: .leading, spacing: 8) {
+                        MultiLanguageSelectionMenu(
+                            availableLanguages: availableLanguagesForCurrentModel(),
+                            selection: selectedLanguage,
+                            onChange: { updateLanguage($0) }
+                        )
+
+                        Text(
+                            "Select one or more languages to restrict detection to those languages, or auto-detect. Picking the languages you actually speak avoids mis-detection (e.g. an accent being heard as a different language)."
+                        )
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    }
                 } else if isMultilingualModel() {
                     VStack(alignment: .leading, spacing: 8) {
                         HStack(spacing: 8) {
@@ -192,6 +211,12 @@ struct LanguageSelectionView: View {
                         .foregroundColor(.secondary)
                 }
                 .disabled(true)
+            } else if supportsMultipleLanguages() {
+                MultiLanguageSelectionMenu(
+                    availableLanguages: availableLanguagesForCurrentModel(),
+                    selection: selectedLanguage,
+                    onChange: { updateLanguage($0) }
+                )
             } else if isMultilingualModel() {
                 HStack(spacing: 8) {
                     Menu {

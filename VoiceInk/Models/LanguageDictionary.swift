@@ -48,6 +48,109 @@ enum TranscriptionLanguageSupport {
         }.first ?? "en"
     }
 
+    // MARK: - Multiple language selection
+
+    /// A stored language value may hold a comma-separated list (e.g. "en,el").
+    /// Splits it into individual, trimmed, non-empty codes preserving order.
+    static func parseSelectedLanguages(_ raw: String?) -> [String] {
+        guard let raw else { return [] }
+        return raw
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    /// Whether a multi-language *restriction* is meaningful for this model.
+    /// Only FluidAudio Parakeet v3 can constrain decoding by script; every
+    /// other engine accepts a single language or full auto-detect.
+    static func supportsMultipleLanguages(for model: any TranscriptionModel) -> Bool {
+        guard model.isMultilingualModel, model.provider == .fluidAudio else { return false }
+        return FluidAudioModelManager.supportsScriptFiltering(named: model.name)
+    }
+
+    /// Validated, de-duplicated, order-preserving list of selected languages for
+    /// a model. "auto" collapses to ["auto"]; an empty/invalid selection falls
+    /// back to `validLanguageOrFallback`.
+    static func validLanguages(_ raw: String?, for model: any TranscriptionModel, realtimeEnabled: Bool? = nil) -> [String] {
+        let supported = languages(for: model, realtimeEnabled: realtimeEnabled)
+        let parsed = parseSelectedLanguages(raw)
+
+        if parsed.contains("auto"), supported["auto"] != nil {
+            return ["auto"]
+        }
+
+        var seen = Set<String>()
+        let valid = parsed.filter { supported[$0] != nil && seen.insert($0).inserted }
+        if !valid.isEmpty {
+            return valid
+        }
+
+        return [validLanguageOrFallback(raw, for: model, realtimeEnabled: realtimeEnabled)]
+    }
+
+    /// Comma-joined form of `validLanguages`, suitable for storage.
+    static func validLanguagesString(_ raw: String?, for model: any TranscriptionModel, realtimeEnabled: Bool? = nil) -> String {
+        validLanguages(raw, for: model, realtimeEnabled: realtimeEnabled).joined(separator: ",")
+    }
+
+    /// The single language code handed to engines that take only one value.
+    /// A single selection is passed through; multiple selections become "auto"
+    /// (when supported) so no one language is wrongly forced.
+    static func primaryLanguage(_ raw: String?, for model: any TranscriptionModel, realtimeEnabled: Bool? = nil) -> String {
+        let valid = validLanguages(raw, for: model, realtimeEnabled: realtimeEnabled)
+        if valid.count == 1 {
+            return valid[0]
+        }
+
+        let supported = languages(for: model, realtimeEnabled: realtimeEnabled)
+        if supported["auto"] != nil {
+            return "auto"
+        }
+        return valid.first ?? validLanguageOrFallback(raw, for: model, realtimeEnabled: realtimeEnabled)
+    }
+
+    /// Normalizes a stored selection for a model: preserves the validated list
+    /// for models that support multi-select, otherwise collapses to one code.
+    static func normalizedSelection(_ raw: String?, for model: any TranscriptionModel, realtimeEnabled: Bool? = nil) -> String {
+        if supportsMultipleLanguages(for: model) {
+            return validLanguagesString(raw, for: model, realtimeEnabled: realtimeEnabled)
+        }
+        return validLanguageOrFallback(raw, for: model, realtimeEnabled: realtimeEnabled)
+    }
+
+    /// Returns the stored value after toggling one language code on/off.
+    /// "auto" is mutually exclusive with specific languages; clearing the last
+    /// specific language reverts to "auto".
+    static func toggling(_ code: String, in raw: String?, available: [String: String]) -> String {
+        if code == "auto" {
+            return "auto"
+        }
+
+        var set = Set(parseSelectedLanguages(raw).filter { $0 != "auto" })
+        if set.contains(code) {
+            set.remove(code)
+        } else {
+            set.insert(code)
+        }
+
+        if set.isEmpty {
+            return "auto"
+        }
+
+        return set
+            .sorted { (available[$0] ?? $0) < (available[$1] ?? $1) }
+            .joined(separator: ",")
+    }
+
+    /// Human-readable summary of a (possibly multi-) language selection.
+    static func displaySummary(for raw: String?, available: [String: String]) -> String {
+        let codes = parseSelectedLanguages(raw)
+        if codes.isEmpty || codes.contains("auto") {
+            return available["auto"] ?? "Auto-detect"
+        }
+        return codes.map { available[$0] ?? $0 }.joined(separator: ", ")
+    }
+
     private static func assemblyAILanguages(usesRealtime: Bool) -> [String: String] {
         let codes = usesRealtime ? assemblyAIRealtimeLanguageCodes : assemblyAIBatchLanguageCodes
         var filtered = LanguageDictionary.all.filter { codes.contains($0.key) }
