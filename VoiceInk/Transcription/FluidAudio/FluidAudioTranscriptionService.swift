@@ -174,10 +174,14 @@ class FluidAudioTranscriptionService: TranscriptionService {
             throw ASRError.notInitialized
         }
 
-        let languageHint = Self.languageHint(
-            from: context.language,
-            model: model
+        // Script-filter hints for each distinct script in the selected set.
+        // Empty -> auto-detect; one -> single forced script; many -> one decode
+        // pass per script, keeping the highest-confidence result.
+        let languageHints = FluidAudioModelManager.languageHints(
+            from: context.languages,
+            for: model.name
         )
+
         var speechAudio = try await preparedSpeechAudio(from: audioURL, usesVAD: true)
 
         // Pad with 1s of silence to capture final punctuation at sequence boundary
@@ -187,11 +191,35 @@ class FluidAudioTranscriptionService: TranscriptionService {
             speechAudio += [Float](repeating: 0, count: trailingSilenceSamples)
         }
 
-        var decoderState = TdtDecoderState.make(decoderLayers: await asrManager.decoderLayerCount)
+        let decoderLayerCount = await asrManager.decoderLayerCount
+
+        if languageHints.count > 1 {
+            var best: ASRResult?
+            for hint in languageHints {
+                var decoderState = TdtDecoderState.make(decoderLayers: decoderLayerCount)
+                let candidate = try await asrManager.transcribe(
+                    speechAudio,
+                    decoderState: &decoderState,
+                    language: hint
+                )
+                logger.info("Multi-language pass [\(hint.rawValue, privacy: .public)] confidence=\(candidate.confidence, privacy: .public)")
+                if let current = best {
+                    if candidate.confidence > current.confidence { best = candidate }
+                } else {
+                    best = candidate
+                }
+            }
+            guard let winner = best else {
+                throw ASRError.processingFailed("No transcription produced")
+            }
+            return TextNormalizer.shared.normalizeSentence(winner.text)
+        }
+
+        var decoderState = TdtDecoderState.make(decoderLayers: decoderLayerCount)
         let result = try await asrManager.transcribe(
             speechAudio,
             decoderState: &decoderState,
-            language: languageHint
+            language: languageHints.first
         )
 
         return TextNormalizer.shared.normalizeSentence(result.text)

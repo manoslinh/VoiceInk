@@ -255,6 +255,25 @@ struct ModeConfigFormView: View {
             }
         } else if let selectedModel = effectiveModelName,
                   let modelInfo = warmupSnapshot.transcriptionModel(named: selectedModel),
+                  TranscriptionLanguageSupport.supportsMultipleLanguages(for: modelInfo) {
+            HStack(spacing: 8) {
+                Text("Language")
+                Spacer(minLength: 12)
+                MultiLanguageSelectionMenu(
+                    availableLanguages: availableLanguages(for: modelInfo),
+                    selection: draft.selectedLanguage ?? UserDefaults.standard.string(forKey: "SelectedLanguage"),
+                    onChange: { draft.selectedLanguage = $0 }
+                )
+            }
+            .onAppear {
+                draft.selectedLanguage = TranscriptionLanguageSupport.normalizedSelection(
+                    draft.selectedLanguage ?? UserDefaults.standard.string(forKey: "SelectedLanguage"),
+                    for: modelInfo,
+                    realtimeEnabled: draft.isRealtimeTranscriptionEnabled
+                )
+            }
+        } else if let selectedModel = effectiveModelName,
+                  let modelInfo = warmupSnapshot.transcriptionModel(named: selectedModel),
                   modelInfo.isMultilingualModel {
             let languageBinding = Binding<String?>(
                 get: { effectiveLanguage(for: modelInfo) },
