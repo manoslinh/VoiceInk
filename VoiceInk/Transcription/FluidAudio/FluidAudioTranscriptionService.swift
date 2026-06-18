@@ -174,13 +174,24 @@ class FluidAudioTranscriptionService: TranscriptionService {
             throw ASRError.notInitialized
         }
 
-        // Script-filter hints for each distinct script in the selected set.
-        // Empty -> auto-detect; one -> single forced script; many -> one decode
-        // pass per script, keeping the highest-confidence result.
-        let languageHints = FluidAudioModelManager.languageHints(
-            from: context.languages,
-            for: model.name
-        )
+        let allowedScripts = FluidAudioModelManager.allowedScripts(from: context.languages, for: model.name)
+
+        // Determine the single-language hint to pass alongside the script set:
+        // - genuine multi-SCRIPT selection (e.g. Greek+English) → nil; rely on the union mask.
+        // - exactly one selected language → pass it (preserves the v3 English-blocklist refinement).
+        // - multiple languages sharing ONE script and none is English → pass the first to keep the blocklist.
+        let nonAuto = context.languages.filter { $0 != "auto" }
+        let singleLanguageCode: String?
+        if nonAuto.count == 1 {
+            singleLanguageCode = nonAuto.first
+        } else if allowedScripts.count == 1 && !nonAuto.contains("en") {
+            singleLanguageCode = nonAuto.first
+        } else {
+            singleLanguageCode = nil
+        }
+        let languageHint: Language? = singleLanguageCode.flatMap {
+            FluidAudioModelManager.languageHint(from: $0, for: model.name)
+        }
 
         var speechAudio = try await preparedSpeechAudio(from: audioURL, usesVAD: true)
 
@@ -193,33 +204,12 @@ class FluidAudioTranscriptionService: TranscriptionService {
 
         let decoderLayerCount = await asrManager.decoderLayerCount
 
-        if languageHints.count > 1 {
-            var best: ASRResult?
-            for hint in languageHints {
-                var decoderState = TdtDecoderState.make(decoderLayers: decoderLayerCount)
-                let candidate = try await asrManager.transcribe(
-                    speechAudio,
-                    decoderState: &decoderState,
-                    language: hint
-                )
-                logger.info("Multi-language pass [\(hint.rawValue, privacy: .public)] confidence=\(candidate.confidence, privacy: .public)")
-                if let current = best {
-                    if candidate.confidence > current.confidence { best = candidate }
-                } else {
-                    best = candidate
-                }
-            }
-            guard let winner = best else {
-                throw ASRError.processingFailed("No transcription produced")
-            }
-            return TextNormalizer.shared.normalizeSentence(winner.text)
-        }
-
         var decoderState = TdtDecoderState.make(decoderLayers: decoderLayerCount)
         let result = try await asrManager.transcribe(
             speechAudio,
             decoderState: &decoderState,
-            language: languageHints.first
+            language: languageHint,
+            allowedScripts: allowedScripts
         )
 
         return TextNormalizer.shared.normalizeSentence(result.text)

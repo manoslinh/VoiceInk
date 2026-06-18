@@ -37,7 +37,22 @@ enum StreamingTranscriptionError: LocalizedError {
 
 /// Protocol for streaming transcription providers.
 protocol StreamingTranscriptionProvider: AnyObject {
-    /// Connect to the streaming transcription endpoint
+    /// Connect to the streaming transcription endpoint.
+    ///
+    /// - Parameters:
+    ///   - language: The primary selected language code (or "auto").
+    ///   - languages: The full validated list of selected language codes. Used by
+    ///     on-device providers that can constrain decoding by writing script (e.g.
+    ///     Parakeet v3's union script filter). Cloud and single-script providers may
+    ///     ignore this and rely on `language`; the default forwarding implementation
+    ///     below keeps them compiling and behaving unchanged.
+    func connect(model: any TranscriptionModel, language: String?, languages: [String]) async throws
+
+    /// Single-language connect. This is a requirement (no default) so that every
+    /// provider supplies a concrete implementation — the `languages` default below
+    /// forwards here via dynamic dispatch, which is only safe if a real witness
+    /// always exists. (A default here would let the two defaults forward to each
+    /// other and recurse infinitely for any provider that overrides neither.)
     func connect(model: any TranscriptionModel, language: String?) async throws
 
     /// Send a chunk of raw PCM audio data (16-bit, 16kHz, mono, little-endian)
@@ -51,4 +66,15 @@ protocol StreamingTranscriptionProvider: AnyObject {
 
     /// Stream of transcription events from the provider
     var transcriptionEvents: AsyncStream<StreamingTranscriptionEvent> { get }
+}
+
+extension StreamingTranscriptionProvider {
+    /// Default for the multi-language form: ignore the full list and forward to the
+    /// single-language `connect`, which is a protocol requirement and therefore
+    /// dynamically dispatches to each provider's concrete implementation. Providers
+    /// that don't need the script set (all cloud providers, Nemotron, Unified) keep
+    /// their existing `connect(model:language:)` and inherit this for free.
+    func connect(model: any TranscriptionModel, language: String?, languages: [String]) async throws {
+        try await connect(model: model, language: language)
+    }
 }

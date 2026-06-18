@@ -164,6 +164,17 @@ class FluidAudioModelManager: ObservableObject {
         return hints
     }
 
+    /// The distinct writing scripts covered by a selected language set, for the
+    /// v3 union token filter. Empty for auto-detect or models without script filtering.
+    nonisolated static func allowedScripts(from languageCodes: [String], for modelName: String) -> Set<Script> {
+        guard supportsScriptFiltering(named: modelName) else { return [] }
+        var scripts = Set<Script>()
+        for code in languageCodes where code != "auto" {
+            if let language = Language(rawValue: code) { scripts.insert(language.script) }
+        }
+        return scripts
+    }
+
     init() {}
 
     // MARK: - Query helpers
