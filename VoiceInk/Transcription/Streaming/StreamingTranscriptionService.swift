@@ -128,7 +128,7 @@ class StreamingTranscriptionService {
         let selectedLanguage = context.language ?? "auto"
         logger.notice("Streaming start requested model=\(model.displayName, privacy: .public) language=\(selectedLanguage, privacy: .public)")
 
-        try await provider.connect(model: model, language: selectedLanguage)
+        try await provider.connect(model: model, language: selectedLanguage, languages: context.languages)
 
         // If cancel() was called while we were awaiting the connection, tear down immediately.
         if state == .cancelled {

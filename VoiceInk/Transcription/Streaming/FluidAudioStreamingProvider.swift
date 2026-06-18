@@ -20,6 +20,7 @@ final class FluidAudioStreamingProvider: StreamingTranscriptionProvider {
     private var asrManager: AsrManager?
     private var decoderLayerCount: Int = 0
     private var languageHint: Language?
+    private var allowedScripts: Set<Script> = []
     private let agreementEngine: WordAgreementEngine
     private let config: AgreementConfig
 
@@ -45,6 +46,10 @@ final class FluidAudioStreamingProvider: StreamingTranscriptionProvider {
     }
 
     func connect(model: any TranscriptionModel, language: String?) async throws {
+        try await connect(model: model, language: language, languages: language.map { [$0] } ?? [])
+    }
+
+    func connect(model: any TranscriptionModel, language: String?, languages: [String]) async throws {
         let version: AsrModelVersion = FluidAudioModelManager.asrVersion(for: model.name)
         let models = try await fluidAudioService.getOrLoadModels(for: version)
 
@@ -52,7 +57,25 @@ final class FluidAudioStreamingProvider: StreamingTranscriptionProvider {
         try await manager.loadModels(models)
         self.asrManager = manager
         self.decoderLayerCount = await manager.decoderLayerCount
-        self.languageHint = FluidAudioTranscriptionService.languageHint(from: language, model: model)
+
+        // Mirror the batch path's script/language resolution so live decoding
+        // honors the same union script filter (see FluidAudioTranscriptionService.transcribe):
+        // - genuine multi-SCRIPT selection (e.g. Greek+English) → nil hint; rely on the union mask.
+        // - exactly one selected language → pass it (preserves the v3 English-blocklist refinement).
+        // - multiple languages sharing ONE script and none is English → pass the first to keep the blocklist.
+        self.allowedScripts = FluidAudioModelManager.allowedScripts(from: languages, for: model.name)
+        let nonAuto = languages.filter { $0 != "auto" }
+        let singleLanguageCode: String?
+        if nonAuto.count == 1 {
+            singleLanguageCode = nonAuto.first
+        } else if allowedScripts.count == 1 && !nonAuto.contains("en") {
+            singleLanguageCode = nonAuto.first
+        } else {
+            singleLanguageCode = nil
+        }
+        self.languageHint = singleLanguageCode.flatMap {
+            FluidAudioModelManager.languageHint(from: $0, for: model.name)
+        }
 
         agreementEngine.reset()
         audioBuffer = []
@@ -91,6 +114,7 @@ final class FluidAudioStreamingProvider: StreamingTranscriptionProvider {
         asrManager = nil
         decoderLayerCount = 0
         languageHint = nil
+        allowedScripts = []
 
         bufferLock.lock()
         audioBuffer = []
@@ -164,7 +188,8 @@ final class FluidAudioStreamingProvider: StreamingTranscriptionProvider {
             let result = try await asrManager.transcribe(
                 audioSlice,
                 decoderState: &state,
-                language: languageHint
+                language: languageHint,
+                allowedScripts: allowedScripts
             )
             lastTranscribedSampleCount = absoluteSampleCount
 
@@ -240,7 +265,8 @@ final class FluidAudioStreamingProvider: StreamingTranscriptionProvider {
             let result = try await asrManager.transcribe(
                 samples,
                 decoderState: &state,
-                language: languageHint
+                language: languageHint,
+                allowedScripts: allowedScripts
             )
             let text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !text.isEmpty else { return nil }
